@@ -11,33 +11,36 @@ namespace Jace
     public class AstBuilder
     {
         private readonly IFunctionRegistry functionRegistry;
-
+        private readonly bool adjustVariableCaseEnabled;
         private Dictionary<char, int> operationPrecedence = new Dictionary<char, int>();
         private Stack<Operation> resultStack = new Stack<Operation>();
         private Stack<Token> operatorStack = new Stack<Token>();
         private Stack<int> parameterCount = new Stack<int>();
 
-        public AstBuilder(IFunctionRegistry functionRegistry)
+        public AstBuilder(IFunctionRegistry functionRegistry, bool adjustVariableCaseEnabled)
         {
             if (functionRegistry == null)
                 throw new ArgumentNullException("functionRegistry");
 
             this.functionRegistry = functionRegistry;
+            this.adjustVariableCaseEnabled = adjustVariableCaseEnabled;
 
             operationPrecedence.Add('(', 0);
-            operationPrecedence.Add('<', 1);
-            operationPrecedence.Add('>', 1);
-            operationPrecedence.Add('≤', 1);
-            operationPrecedence.Add('≥', 1);
-            operationPrecedence.Add('≠', 1);
-            operationPrecedence.Add('=', 1);
-            operationPrecedence.Add('+', 2);
-            operationPrecedence.Add('-', 2);
-            operationPrecedence.Add('*', 3);
-            operationPrecedence.Add('/', 3);
-            operationPrecedence.Add('%', 3);
-            operationPrecedence.Add('_', 5);
-            operationPrecedence.Add('^', 4);
+            operationPrecedence.Add('&', 1);
+            operationPrecedence.Add('|', 1);
+            operationPrecedence.Add('<', 2);
+            operationPrecedence.Add('>', 2);
+            operationPrecedence.Add('≤', 2);
+            operationPrecedence.Add('≥', 2);
+            operationPrecedence.Add('≠', 2);
+            operationPrecedence.Add('=', 2);
+            operationPrecedence.Add('+', 3);
+            operationPrecedence.Add('-', 3);
+            operationPrecedence.Add('*', 4);
+            operationPrecedence.Add('/', 4);
+            operationPrecedence.Add('%', 4);
+            operationPrecedence.Add('_', 6);
+            operationPrecedence.Add('^', 5);
         }
 
         public Operation Build(IList<Token> tokens)
@@ -67,7 +70,12 @@ namespace Jace
                         }
                         else
                         {
-                            resultStack.Push(new Variable(((string)token.Value).ToLowerInvariant()));
+                            string tokenValue = (string)token.Value;
+                            if (adjustVariableCaseEnabled)
+                            {
+                              tokenValue = tokenValue.ToLowerInvariant();
+                            }
+                            resultStack.Push(new Variable(tokenValue));
                         }
                         break;
                     case TokenType.LeftBracket:
@@ -213,6 +221,18 @@ namespace Jace
                         Operation @base = resultStack.Pop();
 
                         return new Exponentiation(DataType.FloatingPoint, @base, exponent);
+                    case '&':
+                        argument2 = resultStack.Pop();
+                        argument1 = resultStack.Pop();
+                        dataType = RequiredDataType(argument1, argument2);
+
+                        return new And(dataType, argument1, argument2);
+                    case '|':
+                        argument2 = resultStack.Pop();
+                        argument1 = resultStack.Pop();
+                        dataType = RequiredDataType(argument1, argument2);
+
+                        return new Or(dataType, argument1, argument2);
                     case '<':
                         argument2 = resultStack.Pop();
                         argument1 = resultStack.Pop();
@@ -272,7 +292,15 @@ namespace Jace
                 {
                     FunctionInfo functionInfo = functionRegistry.GetFunctionInfo(functionName);
 
-                    int numberOfParameters = functionInfo.IsDynamicFunc ? parameterCount.Pop() : functionInfo.NumberOfParameters;
+                    int numberOfParameters;
+
+                    if (functionInfo.IsDynamicFunc) {
+                        numberOfParameters = parameterCount.Pop();
+                    }
+                    else {
+                        parameterCount.Pop();
+                        numberOfParameters = functionInfo.NumberOfParameters;
+                    }
                     
                     List<Operation> operations = new List<Operation>();
                     for (int i = 0; i < numberOfParameters; i++)

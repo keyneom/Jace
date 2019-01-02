@@ -13,9 +13,12 @@ namespace Jace.Execution
     public class DynamicCompiler : IExecutor
     {
         private string FuncAssemblyQualifiedName;
+        private readonly bool adjustVariableCaseEnabled;
 
-        public DynamicCompiler()
+        public DynamicCompiler(): this(true) { }
+        public DynamicCompiler(bool adjustVariableCaseEnabled)
         {
+            this.adjustVariableCaseEnabled = adjustVariableCaseEnabled;
             // The lower func reside in mscorelib, the higher ones in another assembly.
             // This is  an easy cross platform way to to have this AssemblyQualifiedName.
             FuncAssemblyQualifiedName =
@@ -37,12 +40,17 @@ namespace Jace.Execution
             IFunctionRegistry functionRegistry)
         {
             Func<FormulaContext, double> func = BuildFormulaInternal(operation, functionRegistry);
-            return variables =>
+            return adjustVariableCaseEnabled
+                ? (Func<IDictionary<string, double>, double>)(variables =>
                 {
-                    variables = EngineUtil.ConvertVariableNamesToLowerCase(variables);
-                    FormulaContext context = new FormulaContext(variables, functionRegistry);
-                    return func(context);
-                };
+                  variables = EngineUtil.ConvertVariableNamesToLowerCase(variables);
+                  FormulaContext context = new FormulaContext(variables, functionRegistry);
+                  return func(context);
+                })
+                : (Func<IDictionary<string, double>, double>)(variables =>
+                {
+                  return func(new FormulaContext(variables, functionRegistry));
+                });
         }
 
         private Func<FormulaContext, double> BuildFormulaInternal(Operation operation, 
@@ -163,6 +171,26 @@ namespace Jace.Execution
                 UnaryMinus unaryMinus = (UnaryMinus)operation;
                 Expression argument = GenerateMethodBody(unaryMinus.Argument, contextParameter, functionRegistry);
                 return Expression.Negate(argument);
+            }
+            else if (operation.GetType() == typeof(And))
+            {
+                And and = (And)operation;
+                Expression argument1 = Expression.NotEqual(GenerateMethodBody(and.Argument1, contextParameter, functionRegistry), Expression.Constant(0.0));
+                Expression argument2 = Expression.NotEqual(GenerateMethodBody(and.Argument2, contextParameter, functionRegistry), Expression.Constant(0.0));
+
+                return Expression.Condition(Expression.And(argument1, argument2),
+                    Expression.Constant(1.0),
+                    Expression.Constant(0.0));
+            }
+            else if (operation.GetType() == typeof(Or))
+            {
+                Or and = (Or)operation;
+                Expression argument1 = Expression.NotEqual(GenerateMethodBody(and.Argument1, contextParameter, functionRegistry), Expression.Constant(0.0));
+                Expression argument2 = Expression.NotEqual(GenerateMethodBody(and.Argument2, contextParameter, functionRegistry), Expression.Constant(0.0));
+
+                return Expression.Condition(Expression.Or(argument1, argument2),
+                    Expression.Constant(1.0),
+                    Expression.Constant(0.0));
             }
             else if (operation.GetType() == typeof(LessThan))
             {
